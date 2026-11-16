@@ -1,0 +1,32 @@
+[package]
+name = "ecsproxy"
+version = "0.1.0"
+edition = "2024"
+description = "Reverse HTTP proxy for ECS Fargate services, built on Pingora"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+arc-swap = "1"
+async-trait = "0.1"
+aws-config = "1"
+aws-sdk-ecs = "1"
+aws-sdk-route53 = "1"
+aws-sdk-s3 = "1"
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+env_logger = "0.11"
+instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls", "rcgen", "ring"] }
+log = "0.4"
+pingora = { version = "0.9", features = ["proxy", "rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+x509-parser = "0.18"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
