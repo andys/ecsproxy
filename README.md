@@ -63,7 +63,7 @@ Set these on the container definition. Only `proxy-hostname` is required.
 ## Building
 
 Needs a Rust toolchain and `cmake`. `cargo build --release` produces `target/release/ecsproxy`.
-Every push to `main` builds a linux/arm64 binary and publishes it as release `v1`, `v2`, ...
+Every push to `main` builds linux/arm64 and linux/amd64 binaries and publishes them as release `v1`, `v2`, ...
 
 ## Layout
 
