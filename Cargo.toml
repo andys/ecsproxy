@@ -16,6 +16,7 @@ aws-sdk-s3 = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
+http = "1"
 instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls", "rcgen", "ring"] }
 log = "0.4"
 mimalloc = "0.1"

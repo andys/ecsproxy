@@ -1,12 +1,14 @@
 //! The Pingora proxy: hostname routing, backend selection, queueing and retries.
 
-use std::net::SocketAddr;
+use std::fmt::Write;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
+use http::{HeaderName, HeaderValue};
 use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session};
@@ -19,6 +21,67 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a kept-alive backend connection may sit idle in the pool before it is closed.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(1);
 const CHALLENGE_PATH: &str = "/.well-known/acme-challenge/";
+
+const X_FORWARDED_PROTO: &str = "X-Forwarded-Proto";
+const X_FORWARDED_FOR: &str = "X-Forwarded-For";
+const X_REAL_IP: &str = "X-Real-Ip";
+static FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+static HTTP: HeaderValue = HeaderValue::from_static("http");
+static HTTPS: HeaderValue = HeaderValue::from_static("https");
+
+/// An IP address as text on the stack; 45 bytes holds the longest IPv6 form.
+struct IpText {
+    buf: [u8; 45],
+    len: usize,
+}
+
+impl IpText {
+    fn new(ip: IpAddr) -> Self {
+        let mut text = IpText {
+            buf: [0; 45],
+            len: 0,
+        };
+        write!(text, "{ip}").expect("an IP address fits in 45 bytes");
+        text
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.buf[..self.len]
+    }
+}
+
+impl Write for IpText {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.len + s.len();
+        self.buf
+            .get_mut(self.len..end)
+            .ok_or(std::fmt::Error)?
+            .copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+/// The `X-Forwarded-For` and `X-Real-Ip` values for a request from `ip`, appending to any `prior`
+/// `X-Forwarded-For` the client sent.
+fn forwarded(prior: Option<&HeaderValue>, ip: IpAddr) -> Result<(HeaderValue, HeaderValue)> {
+    let ip = IpText::new(ip);
+    let ip = ip.as_bytes();
+    let invalid = || Error::explain(InvalidHTTPHeader, "invalid forwarded address");
+    let real_ip = HeaderValue::from_bytes(ip).map_err(|_| invalid())?;
+    // A prior value that is not visible ASCII is replaced, not extended.
+    let forwarded_for = match prior.filter(|prior| prior.to_str().is_ok()) {
+        Some(prior) => {
+            let mut chain = BytesMut::with_capacity(prior.len() + 2 + ip.len());
+            chain.put_slice(prior.as_bytes());
+            chain.put_slice(b", ");
+            chain.put_slice(ip);
+            HeaderValue::from_maybe_shared(chain.freeze()).map_err(|_| invalid())?
+        }
+        None => real_ip.clone(),
+    };
+    Ok((forwarded_for, real_ip))
+}
 
 /// Wait before retry `n` (1-based): 100ms doubling, capped at 5s; 26.3s over all ten.
 pub fn backoff(n: u32) -> Duration {
@@ -178,22 +241,13 @@ impl ProxyHttp for Proxy {
         _ctx: &mut Ctx,
     ) -> Result<()> {
         let tls = session.digest().is_some_and(|d| d.ssl_digest.is_some());
-        upstream.insert_header("X-Forwarded-Proto", if tls { "https" } else { "http" })?;
-        if let Some(ip) = session
-            .client_addr()
-            .and_then(|a| a.as_inet())
-            .map(|a| a.ip().to_string())
-        {
-            let forwarded = match upstream
-                .headers
-                .get("x-forwarded-for")
-                .and_then(|v| v.to_str().ok())
-            {
-                Some(prior) => format!("{prior}, {ip}"),
-                None => ip.clone(),
-            };
-            upstream.insert_header("X-Forwarded-For", forwarded)?;
-            upstream.insert_header("X-Real-Ip", ip)?;
+        let proto = if tls { &HTTPS } else { &HTTP };
+        upstream.insert_header(X_FORWARDED_PROTO, proto.clone())?;
+        if let Some(ip) = session.client_addr().and_then(|a| a.as_inet()) {
+            let (forwarded_for, real_ip) =
+                forwarded(upstream.headers.get(&FORWARDED_FOR), ip.ip())?;
+            upstream.insert_header(X_FORWARDED_FOR, forwarded_for)?;
+            upstream.insert_header(X_REAL_IP, real_ip)?;
         }
         Ok(())
     }
@@ -248,6 +302,38 @@ impl ProxyHttp for Proxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forwarded_for_appends_the_client_address() {
+        let values = |prior: Option<&'static [u8]>, ip: &str| {
+            let prior = prior.map(|p| HeaderValue::from_bytes(p).unwrap());
+            let (forwarded_for, real_ip) = forwarded(prior.as_ref(), ip.parse().unwrap()).unwrap();
+            (
+                forwarded_for.as_bytes().to_vec(),
+                real_ip.as_bytes().to_vec(),
+            )
+        };
+        let pair = |a: &str, b: &str| (a.as_bytes().to_vec(), b.as_bytes().to_vec());
+        assert_eq!(values(None, "10.1.2.3"), pair("10.1.2.3", "10.1.2.3"));
+        assert_eq!(
+            values(Some(b"1.1.1.1, 2.2.2.2"), "10.1.2.3"),
+            pair("1.1.1.1, 2.2.2.2, 10.1.2.3", "10.1.2.3")
+        );
+        assert_eq!(
+            values(Some(b"caf\xe9"), "10.1.2.3"),
+            pair("10.1.2.3", "10.1.2.3")
+        );
+        let longest = "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
+        assert_eq!(
+            values(Some(b"::1"), longest).0,
+            format!("::1, {longest}").into_bytes()
+        );
+        // An IPv4-mapped address prints in mixed notation.
+        assert_eq!(
+            values(None, "::ffff:255.255.255.255").1,
+            b"::ffff:255.255.255.255"
+        );
+    }
 
     #[test]
     fn ten_retries_back_off_within_thirty_seconds() {

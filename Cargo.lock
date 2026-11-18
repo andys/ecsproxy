@@ -1313,6 +1313,7 @@ dependencies = [
  "bytes",
  "clap",
  "env_logger",
+ "http 1.5.0",
  "instant-acme",
  "log",
  "mimalloc",
