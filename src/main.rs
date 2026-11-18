@@ -2,6 +2,8 @@
 
 mod acme;
 mod backend;
+#[cfg(feature = "count-allocs")]
+mod count;
 mod discovery;
 mod dns;
 mod proxy;
@@ -24,8 +26,13 @@ use pingora::server::Server;
 use pingora::server::configuration::ServerConf;
 use pingora::services::background::background_service;
 
+#[cfg(not(feature = "count-allocs"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(feature = "count-allocs")]
+#[global_allocator]
+static GLOBAL: count::Counting = count::Counting(mimalloc::MiMalloc);
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -91,6 +98,8 @@ async fn aws_config() -> aws_config::SdkConfig {
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
+    #[cfg(feature = "count-allocs")]
+    count::report();
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let aws = tokio::runtime::Builder::new_current_thread()

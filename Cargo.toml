@@ -27,6 +27,14 @@ sha2 = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 x509-parser = "0.18"
 
+[features]
+# Counts allocations per request for benchmarks; see bench/run.sh.
+count-allocs = []
+
+[[example]]
+name = "bench-hello"
+path = "bench/hello.rs"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

@@ -240,6 +240,8 @@ impl ProxyHttp for Proxy {
 
     async fn logging(&self, _session: &mut Session, _e: Option<&Error>, ctx: &mut Ctx) {
         ctx.lease = None;
+        #[cfg(feature = "count-allocs")]
+        crate::count::REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

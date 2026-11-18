@@ -65,6 +65,14 @@ Set these on the container definition. Only `proxy-hostname` is required.
 Needs a Rust toolchain and `cmake`. `cargo build --release` produces `target/release/ecsproxy`.
 Every push to `main` builds linux/arm64 and linux/amd64 binaries and publishes them as release `v1`, `v2`, ...
 
+## Benchmarking
+
+`bench/run.sh [label]` puts the proxy, pinned to one core, between `hey -c 1000` and a hello-world backend,
+and reports requests per second, latency, and allocations per request (from a `--features count-allocs`
+build). A fake ECS endpoint supplies the backend, so no AWS account is needed. Results and the binaries
+are kept in `bench/out/<label>/`; `BUILD=0 bench/run.sh <label>` reruns saved binaries, to compare two
+commits back to back. Needs `hey`, `python3`, `taskset` and four CPUs.
+
 ## Layout
 
 | File | |
@@ -77,3 +85,5 @@ Every push to `main` builds linux/arm64 and linux/amd64 binaries and publishes t
 | `src/dns.rs` | Route53 records for DNS-01 |
 | `src/store.rs` | S3 storage and locking |
 | `src/tls.rs` | SNI certificate selection |
+| `src/count.rs` | Allocation counter behind the `count-allocs` feature |
+| `bench/` | Benchmark script, hello-world backend, fake ECS endpoint |
