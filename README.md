@@ -33,7 +33,7 @@ ecsproxy --cluster my-cluster --s3-bucket my-bucket --http-redirect
 | `--proxy-constraint` | | Only route to containers whose `proxy-constraint` label equals this |
 | `--http-redirect` | off | Redirect HTTP to HTTPS (307, path intact) instead of proxying it |
 | `--warmup` | `10` | Seconds a newly healthy backend waits before receiving traffic |
-| `--request-timeout` | `60` | Seconds a request may spend queueing, retrying and waiting on a backend |
+| `--request-timeout` | `60` | Seconds a request may spend queueing and retrying, and each backend read or write may wait |
 | `--acme-email` | | Contact email for the Let's Encrypt account |
 | `--acme-directory` | Let's Encrypt | ACME directory URL, e.g. the Let's Encrypt staging one |
 | `--http-listen` | `0.0.0.0:80` | Plain HTTP listen address |

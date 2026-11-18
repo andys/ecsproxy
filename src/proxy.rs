@@ -16,6 +16,8 @@ use crate::backend::{Lease, Table, normalize};
 
 pub const MAX_RETRIES: u32 = 10;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a kept-alive backend connection may sit idle in the pool before it is closed.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(1);
 const CHALLENGE_PATH: &str = "/.well-known/acme-challenge/";
 
 /// Wait before retry `n` (1-based): 100ms doubling, capped at 5s; 26.3s over all ten.
@@ -162,8 +164,10 @@ impl ProxyHttp for Proxy {
         let mut peer = HttpPeer::new(backend.addr, false, String::new());
         peer.options.connection_timeout = Some(CONNECT_TIMEOUT.min(remaining));
         peer.options.total_connection_timeout = Some(CONNECT_TIMEOUT.min(remaining));
-        peer.options.read_timeout = Some(remaining);
-        peer.options.write_timeout = Some(remaining);
+        // A fixed duration rather than the remaining deadline, so concurrent requests share timer slots.
+        peer.options.read_timeout = Some(self.timeout);
+        peer.options.write_timeout = Some(self.timeout);
+        peer.options.idle_timeout = Some(IDLE_TIMEOUT);
         Ok(Box::new(peer))
     }
 

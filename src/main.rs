@@ -24,6 +24,9 @@ use pingora::server::Server;
 use pingora::server::configuration::ServerConf;
 use pingora::services::background::background_service;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
